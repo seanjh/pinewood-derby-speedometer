@@ -1,0 +1,11 @@
+profiles:
+  feather:
+    fqbn: "esp32:esp32:featheresp32"
+    platforms:
+      - platform: esp32:esp32 (2.0.14)
+        platform_index_url: "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
+
+default_fqbn: esp32:esp32:featheresp32
+default_port: /dev/ttyUSB0
+default_protocol: serial
+default_profile: feather
