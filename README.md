@@ -30,3 +30,5 @@ Implements a simple speedometer for the 2024 Cub Scouts Pinewood Derby just beca
  - [ESP32 Arduino Core’s documentation](https://docs.espressif.com/projects/arduino-esp32/en/latest/index.html)
  - [ESP32 Datasheet](https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf)
  - [Arduino CLI](https://arduino.github.io/arduino-cli/)
+ - [FreeRTOS.org](https://www.freertos.org/implementation/a00002.html)
+ - [FreeRTOS esp32](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/freertos_idf.html)

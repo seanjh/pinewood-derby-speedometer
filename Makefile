@@ -4,13 +4,14 @@ BOARD = esp32:esp32:featheresp32
 SKETCH_DIR = Speedometer
 CONFIG_FILE = $(SKETCH_DIR)/sketch.yaml
 SKETCH = $(SKETCH_DIR)/Speedometer.ino
+BAUDRATE = 921600
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/$(notdir $(SKETCH)).bin
 PROFILE = feather
 
 monitor:
 	@cd $(SKETCH_DIR)
-	$(ARDUINO_CLI) monitor --port /dev/ttyUSB0
+	$(ARDUINO_CLI) monitor --port /dev/ttyUSB0 --config baudrate=$(BAUDRATE)
 
 compile: clean
 	@cd $(SKETCH_DIR)
