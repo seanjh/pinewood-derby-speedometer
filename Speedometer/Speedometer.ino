@@ -141,47 +141,60 @@ void setClock() {
 void TaskPoll(void *pvParameters) {
   const TaskPollParameters_t* params = (TaskPollParameters_t *) pvParameters;
 
-  for(;;) {
-    //WiFiClient *client = new WiFiClient;
-    WiFiClientSecure *client = new WiFiClientSecure;
-    if (!client) {
-      Serial.println("[TaskPoll] Failed to create WiFiClientSecure.");
-      delay(5000);
-      continue;
-    }
-    client->setInsecure();
-    //client->setCACert(rootCACertificate);
-
-    {
-      //HTTPClient https;
-      HTTPClient http;
-      Serial.printf("[TaskPoll] begin request: %s\n", params->url);
-      if (http.begin(*client, String(params->url))) {
-      //if (https.begin(*client, String(params->url))) {
-        Serial.println("[TaskPoll] GET...");
-        int httpCode = http.GET();
-        if (httpCode > 0) {
-          switch (httpCode) {
-            case HTTP_CODE_OK:
-            case HTTP_CODE_MOVED_PERMANENTLY:
-            String payload = http.getString();
-            Serial.printf("[TaskPoll] response: %s\n", payload.c_str());
-          }
-        } else {
-          Serial.printf("[TaskPoll] GET failed, error: %d %s\n", httpCode, http.errorToString(httpCode).c_str());
-        }
-
-        http.end();
-      } else {
-        Serial.println("[TaskPoll] Unable to connect");
-      }
-    }
-
-    //delete client;
-
-    Serial.println("[TaskPoll] Waiting 5s...");
+  WiFiClientSecure *client = new WiFiClientSecure;
+  //WiFiClient *client = new WiFiClient;
+  while(!client) {
+    Serial.println("[TaskPoll] Failed to create WiFiClientSecure.");
     delay(5000);
   }
+  //client->setCACert(rootCACertificate);
+  client->setInsecure();
+
+  { 
+    //HTTPClient https;
+    // HTTPClient http;
+    // http.setReuse(true);
+    // http.setConnectTimeout(1000);
+
+    for(;;) {
+      HTTPClient http;
+      http.setReuse(true);
+      http.setConnectTimeout(1000);
+      Serial.printf("[TaskPoll] begin request: %s\n", params->url);
+
+      http.addHeader(String("User-Agent"), String("arduino-esp32"));
+      http.addHeader(String("Accept"), String("*/*"));
+      http.addHeader(String("Host"), String("192.168.1.111:8000"));
+
+      if (!http.begin(String(params->url))) {
+      //if (!http.begin(*client, String(params->url))) {
+        Serial.println("[TaskPoll] Unable to connect");
+        delay(5000);
+        continue;
+      }
+
+      Serial.println("[TaskPoll] GET...");
+      int httpCode = http.GET();
+      if (httpCode > 0) {
+        switch (httpCode) {
+          case HTTP_CODE_OK:
+          case HTTP_CODE_MOVED_PERMANENTLY:
+          String payload = http.getString();
+          Serial.printf("[TaskPoll] response: %s\n", payload.c_str());
+        }
+      } else {
+        Serial.printf("[TaskPoll] GET failed, error: %d %s\n", httpCode, http.errorToString(httpCode).c_str());
+      }
+
+      //http.end();
+      http.clear();
+
+      Serial.println("[TaskPoll] Waiting 5s...");
+      delay(5000);
+    }
+  }
+
+  delete client;
 }
 
 void TaskStrobe(void *pvParameters) {
