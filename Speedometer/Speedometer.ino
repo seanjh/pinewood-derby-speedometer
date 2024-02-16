@@ -112,7 +112,7 @@ void setup() {
   xTaskCreate(TaskStrobe, "Task Strobe", 2048, (void*) &blink_delay, 2, NULL);
 
   TaskPollParameters_t *taskPollParams = ((TaskPollParameters_t *) pvPortMalloc(sizeof(TaskPollParameters_t)));
-  taskPollParams->url = "https://httpbin.org/get";
+  taskPollParams->url = "http://192.168.1.111:8000/health";
   taskPollParams->rootCACertificate = rootCACertificate;
   xTaskCreate(TaskPoll, "Task Poll", 16384, (void*) taskPollParams, 2, NULL);
 }
@@ -142,39 +142,40 @@ void TaskPoll(void *pvParameters) {
   const TaskPollParameters_t* params = (TaskPollParameters_t *) pvParameters;
 
   for(;;) {
-    WiFiClientSecure *client = new WiFiClientSecure;
-    if (!client) {
-      Serial.println("[TaskPoll] Failed to create WiFiClientSecure.");
-      delay(5000);
-      continue;
-    }
-    client->setCACert(rootCACertificate);
+    // WiFiClientSecure *client = new WiFiClientSecure;
+    // if (!client) {
+    //   Serial.println("[TaskPoll] Failed to create WiFiClientSecure.");
+    //   delay(5000);
+    //   continue;
+    // }
+    // client->setCACert(rootCACertificate);
 
     {
-      HTTPClient https;
-      Serial.printf("[TaskPoll] begin request to %s\n", params->url);
-      delay(100);
-      if (https.begin(*client, String(params->url))) {
+      //HTTPClient https;
+      HTTPClient http;
+      Serial.printf("[TaskPoll] begin request to '%s'\n", params->url);
+      if (http.begin(String(params->url))) {
+      //if (https.begin(*client, String(params->url))) {
         Serial.println("[TaskPoll] GET...");
-        int httpCode = https.GET();
+        int httpCode = http.GET();
         if (httpCode > 0) {
           switch (httpCode) {
             case HTTP_CODE_OK:
             case HTTP_CODE_MOVED_PERMANENTLY:
-            String payload = https.getString();
+            String payload = http.getString();
             Serial.printf("[TaskPoll] response: %s\n", payload.c_str());
           }
         } else {
-          Serial.printf("[TaskPoll] GET failed, error: %s\n", https.errorToString(httpCode).c_str());
+          Serial.printf("[TaskPoll] GET failed, error: %d - '%s'\n", httpCode, http.errorToString(httpCode).c_str());
         }
 
-        https.end();
+        http.end();
       } else {
         Serial.println("[TaskPoll] Unable to connect");
       }
     }
 
-    delete client;
+    //delete client;
 
     Serial.println("[TaskPoll] Waiting 5s...");
     delay(5000);
