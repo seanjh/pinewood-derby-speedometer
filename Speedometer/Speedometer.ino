@@ -142,19 +142,21 @@ void TaskPoll(void *pvParameters) {
   const TaskPollParameters_t* params = (TaskPollParameters_t *) pvParameters;
 
   for(;;) {
-    // WiFiClientSecure *client = new WiFiClientSecure;
-    // if (!client) {
-    //   Serial.println("[TaskPoll] Failed to create WiFiClientSecure.");
-    //   delay(5000);
-    //   continue;
-    // }
-    // client->setCACert(rootCACertificate);
+    //WiFiClient *client = new WiFiClient;
+    WiFiClientSecure *client = new WiFiClientSecure;
+    if (!client) {
+      Serial.println("[TaskPoll] Failed to create WiFiClientSecure.");
+      delay(5000);
+      continue;
+    }
+    client->setInsecure();
+    //client->setCACert(rootCACertificate);
 
     {
       //HTTPClient https;
       HTTPClient http;
-      Serial.printf("[TaskPoll] begin request to '%s'\n", params->url);
-      if (http.begin(String(params->url))) {
+      Serial.printf("[TaskPoll] begin request: %s\n", params->url);
+      if (http.begin(*client, String(params->url))) {
       //if (https.begin(*client, String(params->url))) {
         Serial.println("[TaskPoll] GET...");
         int httpCode = http.GET();
@@ -166,7 +168,7 @@ void TaskPoll(void *pvParameters) {
             Serial.printf("[TaskPoll] response: %s\n", payload.c_str());
           }
         } else {
-          Serial.printf("[TaskPoll] GET failed, error: %d - '%s'\n", httpCode, http.errorToString(httpCode).c_str());
+          Serial.printf("[TaskPoll] GET failed, error: %d %s\n", httpCode, http.errorToString(httpCode).c_str());
         }
 
         http.end();
