@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"time"
 )
@@ -14,13 +15,26 @@ var portFlag = flag.Int("port", 8080, "Server listen port")
 
 func LoggingMiddleware(f http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := httptest.NewRecorder()
+		f(rec, r)
+
+		resp := rec.Result()
+		for k, v := range resp.Header {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(resp.StatusCode)
+		n, _ := rec.Body.WriteTo(w)
+
 		slog.Info(
-			"Received request",
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.String("host", r.URL.Host),
-			slog.String("scheme", r.URL.Scheme))
-		f(w, r)
+			"Handled request",
+			slog.Group("request",
+				"method", r.Method,
+				"path", r.URL.Path,
+			),
+			slog.Group("response",
+				"status", resp.StatusCode,
+				"bytes", n))
+
 	}
 }
 
@@ -30,18 +44,27 @@ func handleHealthCheck(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-type SpeedUpdate struct {
-	Timestamp int `json:"timestamp"`
+type speedAcceleration struct {
+	XMetersPerSecondSquared int `json:"x"`
+	YMetersPerSecondSquared int `json:"y"`
+	ZMetersPerSecondSquared int `json:"z"`
+}
+
+type speedUpdate struct {
+	Timestamp               int               `json:"timestamp"`
+	VelocityMetersPerSecond int               `json:"veloc"`
+	Acceleration            speedAcceleration `json:"accel"`
 }
 
 func handleSpeedUpdate(w http.ResponseWriter, r *http.Request) {
-	var s SpeedUpdate
+	var s speedUpdate
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&s); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	if s.Timestamp == 0 {
 		http.Error(w, "\"timestamp\" is required", http.StatusBadRequest)
 		return
