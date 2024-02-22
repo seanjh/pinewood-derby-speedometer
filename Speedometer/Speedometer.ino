@@ -5,6 +5,10 @@
 
 #include <HTTPClient.h>
 
+//#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include "Adafruit_LEDBackpack.h"
+
 #include "Secrets.h"
 
 const char* rootCACertificate = \
@@ -94,6 +98,9 @@ typedef struct {
   const char* url;
 } TaskPollParameters_t;
 
+
+Adafruit_8x8matrix matrix = Adafruit_8x8matrix();
+
 void setup() {
   Serial.begin(921600);
   while (!Serial) { delay(100); }
@@ -108,8 +115,10 @@ void setup() {
   
   setClock();
 
-  uint32_t blink_delay = 1000;
+  uint32_t blink_delay = 5000;
   xTaskCreate(TaskStrobe, "Task Strobe", 2048, (void*) &blink_delay, 2, NULL);
+
+  xTaskCreate(TaskDisplay, "Task Display", 2049, NULL, 2, NULL);
 
   TaskPollParameters_t *taskPollParams = ((TaskPollParameters_t *) pvPortMalloc(sizeof(TaskPollParameters_t)));
   taskPollParams->url = "https://httpbin.org/get";
@@ -181,7 +190,27 @@ void TaskPoll(void *pvParameters) {
   }
 }
 
+void TaskDisplay(void *pvParameters) {
+  Serial.println("[TaskDisplay] Beginning...");
+  matrix.begin(0x70);
+  matrix.clear();
+
+  uint16_t value = 0;
+  boolean drawDots = false;
+  for(uint16_t counter = 0; counter < 9999; counter++) {
+    Serial.printf("[TaskDisplay] Displaying %d\n", counter);
+    matrix.println(counter);
+    matrix.writeDisplay();
+    delay(1000);
+  }
+
+  matrix.clear();
+  matrix.println(0);
+  matrix.writeDisplay();
+}
+
 void TaskStrobe(void *pvParameters) {
+  Serial.println("[TaskStrobe] Beginning...");
   uint32_t blink_delay = *((uint32_t*)pvParameters);
 
   pinMode(LED_BUILTIN, OUTPUT);
