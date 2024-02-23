@@ -1,5 +1,3 @@
-#include <Arduino.h>
-
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
@@ -38,8 +36,9 @@ void TaskRecordSpeedUpdate(void *pvParameters) {
       delay(5000);
       continue;
     }
-    //client->setCACert(CONFIG_ROOT_CA_CERTIFICATE);
+    Serial.printf("Setting CA certificate:\n%s\n", CONFIG_ROOT_CA_CERTIFICATE);
     client->setInsecure();
+    //client->setCACert(CONFIG_ROOT_CA_CERTIFICATE);
 
     {
       HTTPClient http;
@@ -50,15 +49,20 @@ void TaskRecordSpeedUpdate(void *pvParameters) {
         Serial.println("[TaskRecordSpeedUpdate] Requesting...");
 
         http.addHeader("Content-Type", "application/json");
-        const char* payload = "{\"foo\":\"bar\"}";
+        const char* payload = "{\"timestamp\":1,\"velocity\":5}";
 
         int httpCode = http.POST(String(payload));
         if (httpCode > 0) {
+          String response = http.getString();
           switch (httpCode) {
             case HTTP_CODE_OK:
+            case HTTP_CODE_ACCEPTED:
             case HTTP_CODE_MOVED_PERMANENTLY:
-            String response = http.getString();
-            Serial.printf("[TaskRecordSpeedUpdate] response: %s\n", response.c_str());
+            Serial.printf("[TaskRecordSpeedUpdate] success response %d: %s\n", httpCode, response.c_str());
+            break;
+            default:
+            Serial.printf("[TaskRecordSpeedUpdate] unexpected response %d: %s\n", httpCode, response.c_str());
+            break;
           }
         } else {
           Serial.printf("[TaskRecordSpeedUpdate] Request failed, error: %s\n", http.errorToString(httpCode).c_str());
@@ -71,7 +75,6 @@ void TaskRecordSpeedUpdate(void *pvParameters) {
     }
 
     delete client;
-
     Serial.println("[TaskRecordSpeedUpdate] Waiting 5s...");
     delay(5000);
   }
