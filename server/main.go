@@ -34,7 +34,7 @@ func main() {
 	flag.Parse()
 
 	http.HandleFunc("GET /health", LoggingMiddleware(handleHealthCheck))
-	http.HandleFunc("POST /api/speed-update", LoggingMiddleware(handleSpeedUpdate))
+	http.HandleFunc("POST /speed-update", LoggingMiddleware(handleSpeedUpdate))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	s := &http.Server{
@@ -45,7 +45,7 @@ func main() {
 	}
 
 	logger.Info("Server starting", "port", *portFlag)
-	if err := s.ListenAndServe(); err != nil {
+	if err := s.ListenAndServeTLS("server.crt", "server.key"); err != nil {
 		logger.Error("Failed to start", "err", err)
 		panic(err)
 	}
