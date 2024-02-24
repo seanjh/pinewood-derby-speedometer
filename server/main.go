@@ -12,6 +12,8 @@ import (
 )
 
 var portFlag = flag.Int("port", 8080, "Server listen port")
+var certFlag = flag.String("cert", "", "TLS certificate (default: '')")
+var certKeyFlag = flag.String("key", "", "TLS certificate key (default: '')")
 
 func LoggingMiddleware(f http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -50,14 +52,28 @@ type speedAcceleration struct {
 	ZMetersPerSecondSquared int `json:"z"`
 }
 
+type metersPerSecond = int
+type metersPerSecondSquared = int
+
 type speedUpdate struct {
-	Timestamp               int               `json:"timestamp"`
-	VelocityMetersPerSecond int               `json:"veloc"`
-	Acceleration            speedAcceleration `json:"accel"`
+	Timestamp     *string                 `json:"timestamp"`
+	Velocity      *metersPerSecond        `json:"velocity"`
+	AccelerationX *metersPerSecondSquared `json:"acceleration_x"`
+	AccelerationY *metersPerSecondSquared `json:"acceleration_y"`
+	AccelerationZ *metersPerSecondSquared `json:"acceleration_z"`
+}
+
+type errorEntry struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type errorResponse struct {
+	Errors []errorEntry `json:"errors,omitempty"`
 }
 
 func handleSpeedUpdate(w http.ResponseWriter, r *http.Request) {
-	var s speedUpdate
+	s := speedUpdate{}
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&s); err != nil {
@@ -65,8 +81,29 @@ func handleSpeedUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.Timestamp == 0 {
-		http.Error(w, "\"timestamp\" is required", http.StatusBadRequest)
+	e := []errorEntry{}
+	if s.Timestamp == nil {
+		e = append(e, errorEntry{
+			Code:    "INPUT_VALIDATION",
+			Message: "\"timestamp\" is required",
+		})
+	}
+	if s.Velocity == nil {
+		e = append(e, errorEntry{
+			Code:    "INPUT_VALIDATION",
+			Message: "\"velocity\" is required",
+		})
+	}
+	if len(e) > 0 {
+		data, err := json.Marshal(errorResponse{
+			Errors: e,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+
+		}
+		http.Error(w, string(data), http.StatusBadRequest)
 		return
 	}
 
@@ -89,8 +126,15 @@ func main() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	logger.Info("Server starting", "port", *portFlag)
-	if err := s.ListenAndServe(); err != nil {
+	var err error
+	if *certFlag != "" {
+		logger.Info("Starting secure server", "port", *portFlag)
+		err = s.ListenAndServeTLS(*certFlag, *certKeyFlag)
+	} else {
+		logger.Info("Starting server", "port", *portFlag)
+		err = s.ListenAndServe()
+	}
+	if err != nil {
 		logger.Error("Failed to start", "err", err)
 		os.Exit(1)
 	}
