@@ -56,7 +56,7 @@ type metersPerSecond = int
 type metersPerSecondSquared = int
 
 type speedUpdate struct {
-	Timestamp     *int                    `json:"timestamp"`
+	Timestamp     *string                 `json:"timestamp"`
 	Velocity      *metersPerSecond        `json:"velocity"`
 	AccelerationX *metersPerSecondSquared `json:"acceleration_x"`
 	AccelerationY *metersPerSecondSquared `json:"acceleration_y"`

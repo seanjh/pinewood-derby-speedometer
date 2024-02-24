@@ -1,3 +1,7 @@
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
@@ -9,6 +13,68 @@
 #include "Config.h"
 #include "Secrets.h"
 
+// Assign the current time in ISO8601 format to buff and return 0,
+// or a -1 to represent an error for cases when buff doesn't fit
+// the time string or the time cannot be generated for some other
+// reason.
+int currentTimeISO8601(char* buff, size_t buffSize) {
+  if (!buff || buffSize < 21) {
+    Serial.println("[currentTimeISO8601] Invalid buffer");
+    return -1;
+  }
+
+  time_t currentTime = time(NULL);
+  Serial.print("[currentTimeISO8601] Formatting current time as ISO8601: ");
+  Serial.println(currentTime);
+  struct tm *utcTime = gmtime(&currentTime);
+
+  if (!utcTime) {
+    Serial.println("[currentTimeISO8601] Failed to convert current time to UTC time");
+    return -1;
+  }
+
+  Serial.println("[currentTimeISO8601] Formatting current time");
+  strftime(buff, buffSize, "%Y-%m-%dT%H:%M:%SZ", utcTime);
+  return 0;
+}
+
+// Speed update (velocity and acceleration)
+typedef struct SpeedUpdate {
+  char timestamp[21];
+  int velocity;
+  int accelerationX;
+  int accelerationY;
+  int accelerationZ;
+} SpeedUpdate_t;
+
+// Assign the payload JSON to the buffer, returning the number of
+// characters written to the buffer, or a number < 0 when the payload
+// has now been completely written.
+int serializeSpeedUpdate(char* buff, int buffSize, struct SpeedUpdate *update) {
+  if (!buff || buffSize < 150) {
+    Serial.println("[serializeSpeedUpdate] Invalid buffer");
+    return -1;
+  }
+
+  Serial.println("[serializeSpeedUpdate] Serializing speed update");
+  return snprintf(
+    buff,
+    buffSize,
+    "{\"timestamp\":\"%s\"," \
+    "\"velocity\":%d," \
+    "\"acceleration_x\":%d," \
+    "\"acceleration_y\":%d," \
+    "\"acceleration_z\":%d}",
+    update->timestamp,
+    update->velocity,
+    update->accelerationX,
+    update->accelerationY,
+    update->accelerationZ
+  );
+}
+
+// Synchronize the system clock with the NTP (Network Time Protocol)
+// server.
 void setClock() {
   configTime(0, 0, "pool.ntp.org");
 
@@ -28,6 +94,7 @@ void setClock() {
   Serial.print(asctime(&timeinfo));
 }
 
+// Forward the speed update to the remote server.
 void TaskRecordSpeedUpdate(void *pvParameters) {
   for(;;) {
     WiFiClientSecure *client = new WiFiClientSecure;
@@ -38,6 +105,7 @@ void TaskRecordSpeedUpdate(void *pvParameters) {
     }
     Serial.printf("Setting CA certificate:\n%s\n", CONFIG_ROOT_CA_CERTIFICATE);
     client->setInsecure();
+    // TODO(sean) fix TLS with local server + self-signed certificate
     //client->setCACert(CONFIG_ROOT_CA_CERTIFICATE);
 
     {
@@ -48,8 +116,27 @@ void TaskRecordSpeedUpdate(void *pvParameters) {
       if (http.begin(*client, String(CONFIG_API_URL))) {
         Serial.println("[TaskRecordSpeedUpdate] Requesting...");
 
+        // TODO(sean) move timestamp creation to code handling accelerometer updates
+        char currentTime[21];
+        if (!currentTimeISO8601(currentTime, sizeof(currentTime)) < 0) {
+          Serial.println("[TaskRecordSpeedUpdate] Failed to create timestamp");
+          continue;
+        }
+
+        struct SpeedUpdate update;
+        strcpy(update.timestamp, currentTime);
+        update.velocity = 0;
+        update.accelerationX = 0;
+        update.accelerationY = 0;
+        update.accelerationZ = 0;
+
         http.addHeader("Content-Type", "application/json");
-        const char* payload = "{\"timestamp\":1,\"velocity\":5}";
+        char payload[150];
+        if (serializeSpeedUpdate(payload, sizeof(payload), &update) < 0) {
+          Serial.println("[TaskRecordSpeedUpdate] Failed to serialize payload");
+          continue;
+        }
+        Serial.printf("[TaskRecordSpeedUpdate] sending payload: %s", payload);
 
         int httpCode = http.POST(String(payload));
         if (httpCode > 0) {
@@ -80,6 +167,7 @@ void TaskRecordSpeedUpdate(void *pvParameters) {
   }
 }
 
+// Output the velocity to the 7-Segment display.
 void TaskUpdateDisplay(void *pvParameters) {
   Adafruit_7segment matrix = Adafruit_7segment();
 
