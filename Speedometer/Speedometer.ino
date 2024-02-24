@@ -2,13 +2,12 @@
 #include <string.h>
 #include <time.h>
 
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-
-#include <HTTPClient.h>
-
 #include <Adafruit_GFX.h>
 #include "Adafruit_LEDBackpack.h"
+#include <Adafruit_LSM6DSOX.h>
+#include <HTTPClient.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
 
 #include "Config.h"
 #include "Secrets.h"
@@ -94,8 +93,53 @@ void setClock() {
   Serial.print(asctime(&timeinfo));
 }
 
+// Record the current velocity from the accelerometer.
+void TaskCaptureSpeed(void *pvParameters) {
+  Adafruit_LSM6DSOX sensor;
+  sensor.setAccelDataRate(CONFIG_ACCEL_DATA_RATE);
+  sensor.setAccelRange(CONFIG_ACCEL_RANGE);
+  
+  if (!sensor.begin_I2C()) {
+    Serial.println("Failed to find LSM6DS chip");
+    return;
+  }
+  Serial.println("LSM6DS found.");
+
+  for (;;) {
+    sensors_event_t accel, gyro, mag, temp;
+    sensor.getEvent(&accel, &gyro, &temp);
+    
+    /* Display the results (acceleration is measured in m/s^2) */
+    Serial.print("\t\tAccel X: ");
+    Serial.print(accel.acceleration.x, 4);
+    Serial.print(" \tY: ");
+    Serial.print(accel.acceleration.y, 4);
+    Serial.print(" \tZ: ");
+    Serial.print(accel.acceleration.z, 4);
+    Serial.println(" \tm/s^2 ");
+
+    /* Display the results (rotation is measured in rad/s) */
+    Serial.print("\t\tGyro  X: ");
+    Serial.print(gyro.gyro.x, 4);
+    Serial.print(" \tY: ");
+    Serial.print(gyro.gyro.y, 4);
+    Serial.print(" \tZ: ");
+    Serial.print(gyro.gyro.z, 4);
+    Serial.println(" \tradians/s ");
+
+    Serial.print("\t\tTemp   :\t\t\t\t\t");
+    Serial.print(temp.temperature);
+    Serial.println(" \tdeg C");
+    Serial.println();
+
+    delay(CONFIG_SENSOR_UPDATE_MILLISECONDS);
+  }
+}
+
 // Forward the speed update to the remote server.
 void TaskRecordSpeedUpdate(void *pvParameters) {
+  Serial.println("[TaskRecordSpeedUpdate] Starting...");
+
   for(;;) {
     WiFiClientSecure *client = new WiFiClientSecure;
     if (!client) {
@@ -169,9 +213,9 @@ void TaskRecordSpeedUpdate(void *pvParameters) {
 
 // Output the velocity to the 7-Segment display.
 void TaskUpdateDisplay(void *pvParameters) {
-  Adafruit_7segment matrix = Adafruit_7segment();
+  Serial.println("[TaskUpdateDisplay] Starting...");
 
-  Serial.println("[TaskUpdateDisplay] Beginning...");
+  Adafruit_7segment matrix = Adafruit_7segment();
   matrix.begin(0x70);
   matrix.clear();
 
@@ -263,8 +307,9 @@ void setup() {
   
   setClock();
 
-  xTaskCreate(TaskUpdateDisplay, "[setup] Task Update Display", 2049, NULL, 2, NULL);
-  xTaskCreate(TaskRecordSpeedUpdate, "[setup] Task Record Speed Update", 16384, NULL, 2, NULL);
+  xTaskCreate(TaskUpdateDisplay, "TaskUpdateDisplay", 2049, NULL, 2, NULL);
+  xTaskCreate(TaskRecordSpeedUpdate, "TaskRecordSpeedUpdate", 16384, NULL, 2, NULL);
+  xTaskCreate(TaskCaptureSpeed, "TaskCaptureSpeed", 2049, NULL, 2, NULL);
 }
 
 void loop() {}
