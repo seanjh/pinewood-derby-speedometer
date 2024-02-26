@@ -395,10 +395,28 @@ void setup() {
     return;
   }
 
-  xTaskCreate(TaskUpdateDisplay, "TaskUpdateDisplay", 4096, NULL, 2, NULL);
-  xTaskCreate(TaskMeasureSpeed, "TaskMeasureSpeed", 16384, NULL, 3, NULL);
+  xTaskCreate(
+    TaskUpdateDisplay,
+    "TaskUpdateDisplay",
+    CONFIG_TASK_UPDATE_DISPLAY_MEMORY_WORDS,
+    NULL,
+    2,
+    NULL);
+  xTaskCreate(
+    TaskMeasureSpeed,
+    "TaskMeasureSpeed",
+    CONFIG_TASK_MEASURE_SPEED_MEMORY_WORDS,
+    NULL,
+    3,
+    NULL);
   #ifdef CONFIG_ENABLE_SPEED_RECORDING
-  xTaskCreate(TaskRecordSpeed, "TaskRecordSpeed", 16384, NULL, 1, NULL);
+  xTaskCreate(
+    TaskRecordSpeed,
+    "TaskRecordSpeed",
+    CONFIG_TASK_RECORD_SPEED_MEMORY_WORDS,
+    NULL,
+    1,
+    NULL);
   #endif
 }
 
