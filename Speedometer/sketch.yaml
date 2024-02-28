@@ -14,22 +14,6 @@ profiles:
       - Adafruit LIS3MDL (1.2.4)
       - Adafruit LSM6DS (4.7.2)
 
-      # - SdFat - Adafruit Fork (2.2.3)
-      # - ArduinoJson (7.0.3)
-      # - Adafruit Unified Sensor
-      # - Adafruit LSM6DS
-      # - Adafruit LIS3MDL
-      # - Adafruit FXOS8700
-      # - Adafruit FXAS21002C
-      # - Adafruit LSM9DS1 Library
-      # - Adafruit LSM9DS0 Library
-      # - Adafruit BMP085 Unified
-      # - Adafruit BluefruitLE nRF51
-      # - Adafruit SPIFlash
-      # - Adafruit Sensor Calibration
-      # - Adafruit LSM303 Accel
-      # - Adafruit LSM303DLH Mag
-
 default_fqbn: esp32:esp32:featheresp32
 default_port: /dev/ttyUSB0
 default_protocol: serial

@@ -11,10 +11,9 @@
 #include "Adafruit_LEDBackpack.h"
 
 #include <Adafruit_AHRS.h>
+#include <Adafruit_Sensor_Calibration_EEPROM.h>
 #include <Adafruit_LIS3MDL.h>
 #include <Adafruit_LSM6DSOX.h>
-//#include <Adafruit_Sensor_Calibration.h>
-#include <Adafruit_Sensor_Calibration_EEPROM.h>
 
 #include "Config.h"
 #include "Secrets.h"
@@ -169,15 +168,8 @@ void TaskMeasureSpeed(void *pvParameters) {
   float roll, pitch, heading;
   float gx, gy, gz;
 
-  // float accelX, accelY, accelZ; // Accelerometer readings
-  // float gyroX, gyroY, gyroZ; // Gyroscope readings
-  // float roll, pitch, heading;
-  // float accAngleX, accAngleY; // Accelerometer-derived angle estimates
-  // float gyroAngleX, gyroAngleY; // Gyroscope-derived angle estimates
-  // float finalAngleX, finalAngleY; // Fused angle estimates
   float linearAccelX, linearAccelY, linearAccelZ; // Linear acceleration components
   float velocityX = 0.0, velocityY = 0.0, velocityZ = 0.0; // Velocity components
-  // const float alpha = 0.98;  // Weighting factor for accelerometer data
   const float accelGravity = 9.81;
 
   unsigned long lastStart = 0;
@@ -240,35 +232,6 @@ void TaskMeasureSpeed(void *pvParameters) {
       "[TaskMeasureSpeed] Orientation: Roll(X)=%0.3f, Pitch(Y)=%0.3f, Heading/Yaw(Z)=%0.3f\n",
       roll, pitch, heading);
 #endif
-
-    /*
-    accelX = measure.acceleration.x;
-    accelY = measure.acceleration.y;
-    accelZ = measure.acceleration.z;
-    gyroX = measure.gyro.x;
-    gyroY = measure.gyro.y;
-    gyroZ = measure.gyro.z;
-
-    // Calculate roll and pitch angles using accelerometer data
-    roll = atan2(accelY, accelZ) * 180.0 / PI;
-    pitch = atan2(-accelX, sqrt(accelY * accelY + accelZ * accelZ)) * 180.0 / PI;
-
-    // Calculate accelerometer-derived angle estimates
-    accAngleX = roll;
-    accAngleY = pitch;
-    // Integrate gyroscope data to obtain gyroAngleX and gyroAngleY
-    gyroAngleX += gyroX * elapsedMs;
-    gyroAngleY += gyroY * elapsedMs;
-
-    // Combine accelerometer and gyroscope data using complementary filter
-    finalAngleX = alpha * gyroAngleX + (1 - alpha) * accAngleX;
-    finalAngleY = alpha * gyroAngleY + (1 - alpha) * accAngleY;
-
-    // Calculate linear acceleration components by subtracting gravitational component
-    linearAccelX = accelX * cos(finalAngleY * PI / 180.0) + accelZ * sin(finalAngleY * PI / 180.0);
-    linearAccelY = accelY * cos(finalAngleX * PI / 180.0) - accelZ * sin(finalAngleX * PI / 180.0);
-    linearAccelZ = accelZ - 9.81; // Subtract gravity (approx. 9.81 m/s^2)
-    */
 
     // Calculate linear acceleration components by subtracting gravitational component
     //linearAccelX = accel.acceleration.x * cos(pitch * PI / 180.0) + accel.acceleration.z * sin(pitch * PI / 180.0);
