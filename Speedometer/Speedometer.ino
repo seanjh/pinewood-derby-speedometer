@@ -7,12 +7,14 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
-#include <Adafruit_AHRS.h>
 #include <Adafruit_GFX.h>
 #include "Adafruit_LEDBackpack.h"
+
+#include <Adafruit_AHRS.h>
 #include <Adafruit_LIS3MDL.h>
 #include <Adafruit_LSM6DSOX.h>
-#include <Adafruit_Sensor_Calibration.h>
+//#include <Adafruit_Sensor_Calibration.h>
+#include <Adafruit_Sensor_Calibration_EEPROM.h>
 
 #include "Config.h"
 #include "Secrets.h"
@@ -101,6 +103,12 @@ void setClock() {
   Serial.print(asctime(&timeinfo));
 }
 
+void initSensors(void) {
+}
+
+void setupSensors(void) {
+}
+
 // Return the magnitude of the vector
 float magnitude(float x, float y, float z) {
   return sqrt(x*x + y*y + z*z);
@@ -108,90 +116,132 @@ float magnitude(float x, float y, float z) {
 
 // Record the current velocity from the accelerometer.
 void TaskMeasureSpeed(void *pvParameters) {
+  Serial.println("[TaskMeasureSpeed] Starting...");
+  Adafruit_Sensor_Calibration_EEPROM cal;
+
+  if (!cal.begin()) {
+    Serial.println("[TaskMeasureSpeed] Failed to initialize calibration helper");
+  } else if (!cal.loadCalibration()) {
+    Serial.println("[TaskMeasureSpeed] No calibration loaded/found");
+  }
+  Serial.println("[TaskMeasureSpeed] Calibration loaded from EEPROM");
+
   Adafruit_LIS3MDL lis3mdl;
   Adafruit_LSM6DSOX lsm6ds;
+
+  if (!lsm6ds.begin_I2C() || !lis3mdl.begin_I2C()) {
+    Serial.println("[TaskMeasureSpeed] Failed to find sensors");
+    return;
+  }
+  Serial.println("[TaskMeasureSpeed] Found LIS3MDL & LSMDSOX");
 
   Adafruit_Sensor *accelerometer, *gyroscope, *magnetometer;
   Adafruit_NXPSensorFusion filter; // slowest
   // Adafruit_Madgwick filter;  // faster than NXP
   // Adafruit_Mahony filter;  // fastest/smalleset
 
-  Adafruit_Sensor_Calibration_EEPROM cal;
-
-  if (!cal.begin()) {
-    Serial.println("Failed to initialize calibration helper");
-  } else if (! cal.loadCalibration()) {
-    Serial.println("No calibration loaded/found");
-  }
-
-  initSensors();
+  accelerometer = lsm6ds.getAccelerometerSensor();
+  gyroscope = lsm6ds.getGyroSensor();
+  magnetometer = &lis3mdl;
+  Serial.println("[TaskMeasureSpeed] Initialized sensors");
 
   accelerometer->printSensorDetails();
   gyroscope->printSensorDetails();
   magnetometer->printSensorDetails();
 
-  setupSensors();
+  // set lowest range
+  lsm6ds.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
+  lsm6ds.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
+  lis3mdl.setRange(LIS3MDL_RANGE_4_GAUSS);
 
-  filter.begin(FILTER_UPDATE_RATE_HZ);
-  // TODO
+  // set slightly above refresh rate
+  lsm6ds.setAccelDataRate(LSM6DS_RATE_104_HZ);
+  lsm6ds.setGyroDataRate(LSM6DS_RATE_104_HZ);
+  lis3mdl.setDataRate(LIS3MDL_DATARATE_1000_HZ);
+  lis3mdl.setPerformanceMode(LIS3MDL_MEDIUMMODE);
+  lis3mdl.setOperationMode(LIS3MDL_CONTINUOUSMODE);
 
-  sensor.setAccelDataRate(CONFIG_ACCEL_DATA_RATE);
-  sensor.setAccelRange(CONFIG_ACCEL_RANGE);
-  
-  if (!sensor.begin_I2C()) {
-    Serial.println("[TaskMeasureSpeed] Failed to find LSM6DS chip");
-    return;
-  }
-  Serial.println("[TaskMeasureSpeed] LSM6DS found.");
+  Serial.println("[TaskMeasureSpeed] Setup sensors");
 
-  float accelX, accelY, accelZ; // Accelerometer readings
-  float gyroX, gyroY, gyroZ; // Gyroscope readings
-  float roll, pitch; // Calculated roll and pitch angles
-  float accAngleX, accAngleY; // Accelerometer-derived angle estimates
-  float gyroAngleX, gyroAngleY; // Gyroscope-derived angle estimates
-  float finalAngleX, finalAngleY; // Fused angle estimates
+  filter.begin(CONFIG_FILTER_UPDATE_RATE_HZ);
+  Serial.println("[TaskMeasureSpeed] Setup NXP sensor fusion");
+
+  float roll, pitch, heading;
+  float gx, gy, gz;
+
+  // float accelX, accelY, accelZ; // Accelerometer readings
+  // float gyroX, gyroY, gyroZ; // Gyroscope readings
+  // float roll, pitch, heading;
+  // float accAngleX, accAngleY; // Accelerometer-derived angle estimates
+  // float gyroAngleX, gyroAngleY; // Gyroscope-derived angle estimates
+  // float finalAngleX, finalAngleY; // Fused angle estimates
   float linearAccelX, linearAccelY, linearAccelZ; // Linear acceleration components
   float velocityX = 0.0, velocityY = 0.0, velocityZ = 0.0; // Velocity components
-  const float alpha = 0.98;  // Weighting factor for accelerometer data
+  // const float alpha = 0.98;  // Weighting factor for accelerometer data
   const float accelGravity = 9.81;
 
-  unsigned long prevTimestamp = 0;
-
+  unsigned long lastStart = 0;
+  unsigned long start = 0;
   for (;;) {
-    /*
-    char currentTime[21];
-    if (!currentTimeISO8601(currentTime, sizeof(currentTime)) < 0) {
-      Serial.println("[TaskMeasureSpeed] Failed to create timestamp");
-      continue;
-    }
-    */
+    lastStart = start;
+    start = millis();
+    int elapsed = start - lastStart;
 
-    unsigned long currentTimestamp = millis();
-    float elapsedMs = (currentTimestamp - prevTimestamp) / 1000.0;
-
-    Serial.printf("[TaskMeasureSpeed] Capturing sensor readings at: %d\n", currentTimestamp);
-    sensors_event_t measure, gyro, temp;
-    sensor.getEvent(&measure, &gyro, &temp);
+    sensors_event_t accel, gyro, mag;
+    accelerometer->getEvent(&accel);
+    gyroscope->getEvent(&gyro);
+    magnetometer->getEvent(&mag);
     
-    /* Display the results (acceleration is measured in m/s^2) */
-    Serial.print("[TaskMeasureSpeed] Accel X: ");
-    Serial.print(measure.acceleration.x, 4);
-    Serial.print(" \tY: ");
-    Serial.print(measure.acceleration.y, 4);
-    Serial.print(" \tZ: ");
-    Serial.print(measure.acceleration.z, 4);
-    Serial.println(" \tm/s^2 ");
+    unsigned long elapsedI2c = millis() - start;
 
-    /* Display the results (rotation is measured in rad/s) */
-    Serial.print("[TaskMeasureSpeed] Gyro X: ");
-    Serial.print(gyro.gyro.x);
-    Serial.print(" \tY: ");
-    Serial.print(gyro.gyro.y);
-    Serial.print(" \tZ: ");
-    Serial.print(gyro.gyro.z);
-    Serial.println(" radians/s ");
-    Serial.println();
+    cal.calibrate(mag);
+    cal.calibrate(accel);
+    cal.calibrate(gyro);
 
+    // Gyroscope needs to be converted from Rad/s to Degree/s
+    // the rest are not unit-important
+    gx = gyro.gyro.x * SENSORS_RADS_TO_DPS;
+    gy = gyro.gyro.y * SENSORS_RADS_TO_DPS;
+    gz = gyro.gyro.z * SENSORS_RADS_TO_DPS;
+
+#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
+    Serial.printf(
+      "[TaskMeasureSpeed] I2C duration: %d ms\n",
+      elapsedI2c);
+    Serial.printf(
+      "[TaskMeasureSpeed] Accel X=%0.3f \tY=%0.3f, \tZ=%0.3f \tm/s^2\n",
+      accel.acceleration.x, accel.acceleration.y, accel.acceleration.z);
+    Serial.printf(
+      "[TaskMeasureSpeed] Gyro: X=%0.3f \tY=%0.3f, \tZ=%0.3f \tdegrees/s\n",
+      gx, gy, gz);
+    Serial.printf(
+      "[TaskMeasureSpeed] Mag: X=%0.3f \tY: %0.3f, \tZ: %0.3f \ttesla/s\n",
+      mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
+#endif
+
+    filter.update(
+      gx, gy, gz,
+      accel.acceleration.x, accel.acceleration.y, accel.acceleration.z,
+      mag.magnetic.x, mag.magnetic.y, mag.magnetic.z
+    );
+
+    // print the heading, pitch and roll
+    roll = filter.getRoll();
+    pitch = filter.getPitch();
+    heading = filter.getYaw();
+
+    unsigned long elapsedFusion = millis() - start - elapsedI2c;
+
+#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
+    Serial.printf(
+      "[TaskMeasureSpeed] Sensor fusion duration: %d ms\n",
+      elapsedFusion);
+    Serial.printf(
+      "[TaskMeasureSpeed] Orientation: Roll(X)=%0.3f, Pitch(Y)=%0.3f, Heading/Yaw(Z)=%0.3f\n",
+      roll, pitch, heading);
+#endif
+
+    /*
     accelX = measure.acceleration.x;
     accelY = measure.acceleration.y;
     accelZ = measure.acceleration.z;
@@ -218,26 +268,37 @@ void TaskMeasureSpeed(void *pvParameters) {
     linearAccelX = accelX * cos(finalAngleY * PI / 180.0) + accelZ * sin(finalAngleY * PI / 180.0);
     linearAccelY = accelY * cos(finalAngleX * PI / 180.0) - accelZ * sin(finalAngleX * PI / 180.0);
     linearAccelZ = accelZ - 9.81; // Subtract gravity (approx. 9.81 m/s^2)
+    */
+
+    // Calculate linear acceleration components by subtracting gravitational component
+    //linearAccelX = accel.acceleration.x * cos(pitch * PI / 180.0) + accel.acceleration.z * sin(pitch * PI / 180.0);
+    linearAccelX = 0;
+    linearAccelY = accel.acceleration.y * cos(roll * PI / 180.0) - accel.acceleration.z * sin(roll * PI / 180.0);
+    linearAccelZ = accel.acceleration.z - accelGravity; // Subtract gravity (approx. 9.81 m/s^2)
+    Serial.printf(
+      "[TaskMeasureSpeed] Linear accel X=%0.3f \tY=%0.3f, \tZ=%0.3f \tm/s^2\n",
+      linearAccelX, linearAccelY, linearAccelZ);
 
     // Integrate linear acceleration to obtain velocity
-    velocityX += linearAccelX * elapsedMs;
-    velocityY += linearAccelY * elapsedMs;
-    velocityZ += linearAccelZ * elapsedMs;
+    //velocityX += linearAccelX * elapsedMs;
+    velocityX = 0; // we don't measure lateral velocity
+    velocityY += (abs(linearAccelY) < CONFIG_ACCEL_THRESHOLD ? 0 : (linearAccelY * elapsed));
+    velocityZ += (abs(linearAccelZ) < CONFIG_ACCEL_THRESHOLD ? 0 : (linearAccelZ * elapsed));
 
     // Calculate speed (magnitude of velocity)
-    Serial.print("[TaskMeasureSpeed] Veloc X: ");
-    Serial.print(velocityX, 4);
-    Serial.print(" \tY: ");
-    Serial.print(velocityY, 4);
-    Serial.print(" \tZ: ");
-    Serial.print(velocityZ, 4);
-    Serial.println(" \tm/s ");
-
     float speed = magnitude(velocityX, velocityY, velocityZ);
+
+    unsigned long elapsedIntegration = millis() - start - elapsedI2c - elapsedFusion;
+
+#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
+    Serial.printf("[TaskMeasureSpeed] Integration duration: %d ms\n", elapsedIntegration);
+    Serial.printf("[TaskMeasureSpeed] Velocity: X=%0.3f, Y=%0.3f, Z=%0.3f \tm/s\n", velocityX, velocityY, velocityZ);
+
     Serial.printf("[TaskMeasureSpeed] Speed: %d\n", speed);
+#endif
 
     SpeedUpdate_t update;
-    update.timestamp = currentTimestamp;
+    update.timestamp = start;
     //strcpy(update.timestamp, "2024-01-01T00:00:00Z");
     update.velocity = speed;
     update.accelerationX = linearAccelX;
@@ -249,7 +310,9 @@ void TaskMeasureSpeed(void *pvParameters) {
       Serial.println("[TaskMeasureSpeed] Failed to send update");
       continue;
     }
+#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
     Serial.println("[TaskMeasureSpeed] Sent speed update");
+#endif
     vTaskDelay(pdMS_TO_TICKS(CONFIG_SENSOR_UPDATE_MILLISECONDS));
   }
 }
@@ -334,13 +397,14 @@ void TaskUpdateDisplay(void *pvParameters) {
   matrix.begin(0x70);
   matrix.clear();
 
-  SpeedUpdate_t update;
-
   for(;;) {
+    SpeedUpdate_t update;
     if (xQueueReceive(speedUpdateQueue, &update, portMAX_DELAY) != pdPASS) {
       Serial.println("[TaskUpdateDisplay] Failed to receive message from queue");
     }
+#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
     Serial.println("[TaskUpdateDisplay] Received message from queue");
+#endif
     matrix.writeDigitNum(0, (update.velocity / 1000));
     matrix.writeDigitNum(1, (update.velocity / 100) % 10);
     matrix.writeDigitNum(3, (update.velocity / 10) % 10);

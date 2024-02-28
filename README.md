@@ -23,6 +23,7 @@ Implements a simple speedometer for the 2024 Cub Scouts Pinewood Derby just beca
 - `arduino-cli core update-index` - Update the core index
 - `arduino-cli core install esp32:esp32` - Install the core for the ESP32
 - `python3 -m pip install -r requirements.txt` - Install the ESP32 prerequisites
+- Calibrate the sensors (see "How to Fuse Motion..." in references)
 
 ## References
 
@@ -32,3 +33,4 @@ Implements a simple speedometer for the 2024 Cub Scouts Pinewood Derby just beca
  - [Arduino CLI](https://arduino.github.io/arduino-cli/)
  - [FreeRTOS.org](https://www.freertos.org/implementation/a00002.html)
  - [FreeRTOS esp32](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/freertos_idf.html)
+ - [How to Fuse Motion Sensor Data into AHRS Orientation (Euler/Quaternions)](https://learn.adafruit.com/how-to-fuse-motion-sensor-data-into-ahrs-orientation-euler-quaternions)

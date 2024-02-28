@@ -5,17 +5,30 @@ profiles:
       - platform: esp32:esp32 (2.0.14)
         platform_index_url: "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
     libraries:
-      - Adafruit Sensor Calibration (1.0.2)
-      # - Adafruit LED Backpack Library (1.5.1)
-      # - Adafruit GFX Library (1.11.9)
-      # - Adafruit BusIO (1.15.0)
+      - Adafruit LED Backpack Library (1.5.1)
+      - Adafruit GFX Library (1.11.9)
+      - Adafruit BusIO (1.15.0)
       - Adafruit Unified Sensor (1.1.14)
-      - SdFat - Adafruit Fork (2.2.3)
-      - ArduinoJson (7.0.3)
-      - Adafruit SPIFlash (4.3.4)
-      # - Adafruit LSM6DSOX (1.1.2)
-      # - Adafruit LIS3MDL (1.2.4)
-      # - SensorFusion (1.0.6)
+      - Adafruit Sensor Calibration (1.1.5)
+      - Adafruit AHRS (2.3.5)
+      - Adafruit LIS3MDL (1.2.4)
+      - Adafruit LSM6DS (4.7.2)
+
+      # - SdFat - Adafruit Fork (2.2.3)
+      # - ArduinoJson (7.0.3)
+      # - Adafruit Unified Sensor
+      # - Adafruit LSM6DS
+      # - Adafruit LIS3MDL
+      # - Adafruit FXOS8700
+      # - Adafruit FXAS21002C
+      # - Adafruit LSM9DS1 Library
+      # - Adafruit LSM9DS0 Library
+      # - Adafruit BMP085 Unified
+      # - Adafruit BluefruitLE nRF51
+      # - Adafruit SPIFlash
+      # - Adafruit Sensor Calibration
+      # - Adafruit LSM303 Accel
+      # - Adafruit LSM303DLH Mag
 
 default_fqbn: esp32:esp32:featheresp32
 default_port: /dev/ttyUSB0
