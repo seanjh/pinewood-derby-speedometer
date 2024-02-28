@@ -9,6 +9,8 @@ profiles:
       - Adafruit GFX Library (1.11.9)
       - Adafruit BusIO (1.15.0)
       - Adafruit Unified Sensor (1.1.14)
+      - Adafruit Sensor Calibration (1.1.5)
+      - Adafruit AHRS (2.3.5)
       - Adafruit LIS3MDL (1.2.4)
       - Adafruit LSM6DS (4.7.2)
 
