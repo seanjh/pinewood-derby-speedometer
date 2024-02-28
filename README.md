@@ -6,7 +6,8 @@ Implements a simple speedometer for the 2024 Cub Scouts Pinewood Derby just beca
 
 - Adafruit HUZZAH32 - ESP32 Feather ([overview](https://learn.adafruit.com/adafruit-huzzah32-esp32-feather/overview), [product](https://www.adafruit.com/product/3405))
 - Adafruit 7-Segment LED FeatherWings ([overview](https://learn.adafruit.com/adafruit-7-segment-led-featherwings/), [product](https://www.adafruit.com/product/3108))
-- Adafruit LSM6DSOX + LIS3MDL FeatherWing - Precision 9-DoF IMU ([overview](https://learn.adafruit.com/st-9-dof-combo), [product](https://www.adafruit.com/product/4565))
+- ~Adafruit LSM6DSOX + LIS3MDL FeatherWing - Precision 9-DoF IMU ([overview](https://learn.adafruit.com/st-9-dof-combo), [product](https://www.adafruit.com/product/4565))~
+- A3144E Hall Effect Sensor
 
 ## Setup
 
@@ -34,3 +35,4 @@ Implements a simple speedometer for the 2024 Cub Scouts Pinewood Derby just beca
  - [FreeRTOS.org](https://www.freertos.org/implementation/a00002.html)
  - [FreeRTOS esp32](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/freertos_idf.html)
  - [How to Fuse Motion Sensor Data into AHRS Orientation (Euler/Quaternions)](https://learn.adafruit.com/how-to-fuse-motion-sensor-data-into-ahrs-orientation-euler-quaternions)
+ - [A3141, A3142, A3143, and A3144](https://www.allegromicro.com/~/media/Files/Datasheets/A3141-2-3-4-Datasheet.ashx)
