@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 
 #include <HTTPClient.h>
@@ -10,74 +11,92 @@
 #include <Adafruit_GFX.h>
 #include "Adafruit_LEDBackpack.h"
 
-#include <Adafruit_AHRS.h>
-#include <Adafruit_Sensor_Calibration_EEPROM.h>
-#include <Adafruit_LIS3MDL.h>
-#include <Adafruit_LSM6DSOX.h>
-
 #include "Config.h"
 #include "Secrets.h"
 
-QueueHandle_t speedUpdateQueue;
+static const int hallSensorPin = 12;
+static const int stateMagnet = LOW;
+static const int stateNothing = HIGH;
+
+static const float millisecondsPerSecond = 1000.0;
+static const float millimetersPerMeter = 1000.0;
+static const float wheelCircumference = 0.0879646;
+static const float kphToMph = 0.621371;
+#ifdef CONFIG_CONVERT_TO_MPH
+static const char velocityUnits[] = "mi/h";
+#else
+static const char velocityUnits[] = "km/h";
+#endif
 
 // Speed update (velocity and acceleration)
 typedef struct SpeedUpdate {
-  unsigned long timestamp;
+  uint64_t timestamp;
   int velocity;
-  float accelerationX;
-  float accelerationY;
-  float accelerationZ;
 } SpeedUpdate_t;
+
+QueueHandle_t speedUpdateQueue;
 
 // Assign the current time in ISO8601 format to buff and return 0,
 // or a -1 to represent an error for cases when buff doesn't fit
 // the time string or the time cannot be generated for some other
 // reason.
-int currentTimeISO8601(char* buff, size_t buffSize) {
-  // TODO(sean) rewrite w/ baseline + ticks
-  if (!buff || buffSize < 21) {
+int currentTimeISO8601(char* buff, size_t buffSize, uint64_t epochTimeMillis) {
+  if (!buff || buffSize < 24) {
     Serial.println("[currentTimeISO8601] Invalid buffer");
     return -1;
   }
 
-  time_t currentTime = time(NULL);
-  Serial.print("[currentTimeISO8601] Formatting current time as ISO8601: ");
-  Serial.println(currentTime);
-  struct tm *utcTime = gmtime(&currentTime);
+  time_t currentTimeSeconds = epochTimeMillis / 1000;
+  int milliseconds = epochTimeMillis % 1000;
+  struct tm *utcTime = gmtime(&currentTimeSeconds);
 
   if (!utcTime) {
-    Serial.println("[currentTimeISO8601] Failed to convert current time to UTC time");
+    Serial.println("[currentTimeISO8601] Failed to convert time to UTC time");
     return -1;
   }
 
-  strftime(buff, buffSize, "%Y-%m-%dT%H:%M:%SZ", utcTime);
-  Serial.printf("[currentTimeISO8601] Formatted current time: %s\n", buff);
+  char isoTime[20];
+  strftime(isoTime, sizeof(isoTime), "%Y-%m-%dT%H:%M:%S", utcTime);
+
+  if (snprintf(buff, buffSize, "%s.%03dZ", isoTime, milliseconds) >= buffSize) {
+    Serial.println("[currentTimeISO8601] Buffer size too small");
+    return -1;
+  }
+
   return 0;
+}
+
+uint64_t uptimeToEpochMillis(int64_t uptime) {
+  struct timeval now;
+  gettimeofday(&now, NULL);
+
+  uint64_t nowEpochMillis = (uint64_t)now.tv_sec * 1000LL + (now.tv_usec / 1000LL);
+
+  uint64_t currentUptimeMillis = esp_timer_get_time() / 1000;
+
+  return nowEpochMillis - (currentUptimeMillis - uptime / 1000);
 }
 
 // Assign the payload JSON to the buffer, returning the number of
 // characters written to the buffer, or a number < 0 when the payload
 // has now been completely written.
 int serializeSpeedUpdate(char* buff, int buffSize, struct SpeedUpdate *update) {
-  if (!buff || buffSize < 150) {
+  if (!buff || buffSize < 60) {
     Serial.println("[serializeSpeedUpdate] Invalid buffer");
     return -1;
   }
 
+  // convert epoch time (in millis) to an ISO8601 string
+  char timestamp[25];
+  currentTimeISO8601(timestamp, sizeof(timestamp), update->timestamp);
+
+#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
   Serial.println("[serializeSpeedUpdate] Serializing speed update");
+#endif
   return snprintf(
-    buff,
-    buffSize,
-    "{\"timestamp\":\"%s\"," \
-    "\"velocity\":%d," \
-    "\"acceleration_x\":%d," \
-    "\"acceleration_y\":%d," \
-    "\"acceleration_z\":%d}",
-    update->timestamp,
-    update->velocity,
-    update->accelerationX,
-    update->accelerationY,
-    update->accelerationZ
+    buff, buffSize,
+    "{\"timestamp\":\"%s\",\"velocity\":%d}",
+    timestamp, update->velocity
   );
 }
 
@@ -99,174 +118,54 @@ void setClock() {
   struct tm timeinfo;
   gmtime_r(&nowSecs, &timeinfo);
   Serial.print(F("[setClock] Current time: "));
-  Serial.print(asctime(&timeinfo));
-}
-
-void initSensors(void) {
-}
-
-void setupSensors(void) {
-}
-
-// Return the magnitude of the vector
-float magnitude(float x, float y, float z) {
-  return sqrt(x*x + y*y + z*z);
+  Serial.println(asctime(&timeinfo));
 }
 
 // Record the current velocity from the accelerometer.
 void TaskMeasureSpeed(void *pvParameters) {
   Serial.println("[TaskMeasureSpeed] Starting...");
-  Adafruit_Sensor_Calibration_EEPROM cal;
 
-  if (!cal.begin()) {
-    Serial.println("[TaskMeasureSpeed] Failed to initialize calibration helper");
-  } else if (!cal.loadCalibration()) {
-    Serial.println("[TaskMeasureSpeed] No calibration loaded/found");
-  }
-  Serial.println("[TaskMeasureSpeed] Calibration loaded from EEPROM");
-
-  Adafruit_LIS3MDL lis3mdl;
-  Adafruit_LSM6DSOX lsm6ds;
-
-  if (!lsm6ds.begin_I2C() || !lis3mdl.begin_I2C()) {
-    Serial.println("[TaskMeasureSpeed] Failed to find sensors");
-    return;
-  }
-  Serial.println("[TaskMeasureSpeed] Found LIS3MDL & LSMDSOX");
-
-  Adafruit_Sensor *accelerometer, *gyroscope, *magnetometer;
-  Adafruit_NXPSensorFusion filter; // slowest
-  // Adafruit_Madgwick filter;  // faster than NXP
-  // Adafruit_Mahony filter;  // fastest/smalleset
-
-  accelerometer = lsm6ds.getAccelerometerSensor();
-  gyroscope = lsm6ds.getGyroSensor();
-  magnetometer = &lis3mdl;
-  Serial.println("[TaskMeasureSpeed] Initialized sensors");
-
-  accelerometer->printSensorDetails();
-  gyroscope->printSensorDetails();
-  magnetometer->printSensorDetails();
-
-  // set lowest range
-  lsm6ds.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
-  lsm6ds.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
-  lis3mdl.setRange(LIS3MDL_RANGE_4_GAUSS);
-
-  // set slightly above refresh rate
-  lsm6ds.setAccelDataRate(LSM6DS_RATE_104_HZ);
-  lsm6ds.setGyroDataRate(LSM6DS_RATE_104_HZ);
-  lis3mdl.setDataRate(LIS3MDL_DATARATE_1000_HZ);
-  lis3mdl.setPerformanceMode(LIS3MDL_MEDIUMMODE);
-  lis3mdl.setOperationMode(LIS3MDL_CONTINUOUSMODE);
-
-  Serial.println("[TaskMeasureSpeed] Setup sensors");
-
-  filter.begin(CONFIG_FILTER_UPDATE_RATE_HZ);
-  Serial.println("[TaskMeasureSpeed] Setup NXP sensor fusion");
-
-  float roll, pitch, heading;
-  float gx, gy, gz;
-
-  float linearAccelX, linearAccelY, linearAccelZ; // Linear acceleration components
-  float velocityX = 0.0, velocityY = 0.0, velocityZ = 0.0; // Velocity components
-  const float accelGravity = 9.81;
-
-  unsigned long lastStart = 0;
-  unsigned long start = 0;
+  int lastState = stateNothing;
+  int64_t lastTime = esp_timer_get_time();
+  int64_t lastRotationTime = lastTime;
   for (;;) {
-    lastStart = start;
-    start = millis();
-    int elapsed = start - lastStart;
+    int64_t now = esp_timer_get_time();
+    int state = digitalRead(hallSensorPin);
 
-    sensors_event_t accel, gyro, mag;
-    accelerometer->getEvent(&accel);
-    gyroscope->getEvent(&gyro);
-    magnetometer->getEvent(&mag);
-    
-    unsigned long elapsedI2c = millis() - start;
+    if (state == lastState) {
+      continue;
+    }
+    lastState = state;
 
-    cal.calibrate(mag);
-    cal.calibrate(accel);
-    cal.calibrate(gyro);
+    // don't need to record the time the magnet remains "on" the sensor
+    if (state == stateNothing) {
+      continue;
+    }
 
-    // Gyroscope needs to be converted from Rad/s to Degree/s
-    // the rest are not unit-important
-    gx = gyro.gyro.x * SENSORS_RADS_TO_DPS;
-    gy = gyro.gyro.y * SENSORS_RADS_TO_DPS;
-    gz = gyro.gyro.z * SENSORS_RADS_TO_DPS;
+    // rotation time is the time between two "magnet on" states
+    int durationMilliseconds = ((now - lastRotationTime) % 1000000) / 1000;
+    lastRotationTime = now;
 
-#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
-    Serial.printf(
-      "[TaskMeasureSpeed] I2C duration: %d ms\n",
-      elapsedI2c);
-    Serial.printf(
-      "[TaskMeasureSpeed] Accel X=%0.3f \tY=%0.3f, \tZ=%0.3f \tm/s^2\n",
-      accel.acceleration.x, accel.acceleration.y, accel.acceleration.z);
-    Serial.printf(
-      "[TaskMeasureSpeed] Gyro: X=%0.3f \tY=%0.3f, \tZ=%0.3f \tdegrees/s\n",
-      gx, gy, gz);
-    Serial.printf(
-      "[TaskMeasureSpeed] Mag: X=%0.3f \tY: %0.3f, \tZ: %0.3f \ttesla/s\n",
-      mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
+    float velocity = (
+      wheelCircumference // change in position
+      / durationMilliseconds // change in time
+      * 3600 // conversion m/ms -> km/h
+#ifdef CONFIG_CONVERT_TO_MPH
+      * kphToMph // conversion km/h -> mi/h
 #endif
-
-    filter.update(
-      gx, gy, gz,
-      accel.acceleration.x, accel.acceleration.y, accel.acceleration.z,
-      mag.magnetic.x, mag.magnetic.y, mag.magnetic.z
     );
 
-    // print the heading, pitch and roll
-    roll = filter.getRoll();
-    pitch = filter.getPitch();
-    heading = filter.getYaw();
-
-    unsigned long elapsedFusion = millis() - start - elapsedI2c;
-
+    uint64_t nowEpochMillis = uptimeToEpochMillis(now);
 #ifdef CONFIG_ENABLE_DEBUG_OUTPUT
-    Serial.printf(
-      "[TaskMeasureSpeed] Sensor fusion duration: %d ms\n",
-      elapsedFusion);
-    Serial.printf(
-      "[TaskMeasureSpeed] Orientation: Roll(X)=%0.3f, Pitch(Y)=%0.3f, Heading/Yaw(Z)=%0.3f\n",
-      roll, pitch, heading);
-#endif
-
-    // Calculate linear acceleration components by subtracting gravitational component
-    //linearAccelX = accel.acceleration.x * cos(pitch * PI / 180.0) + accel.acceleration.z * sin(pitch * PI / 180.0);
-    linearAccelX = 0;
-    linearAccelY = accel.acceleration.y * cos(roll * PI / 180.0) - accel.acceleration.z * sin(roll * PI / 180.0);
-    linearAccelZ = accel.acceleration.z - accelGravity; // Subtract gravity (approx. 9.81 m/s^2)
-    Serial.printf(
-      "[TaskMeasureSpeed] Linear accel X=%0.3f \tY=%0.3f, \tZ=%0.3f \tm/s^2\n",
-      linearAccelX, linearAccelY, linearAccelZ);
-
-    // Integrate linear acceleration to obtain velocity
-    //velocityX += linearAccelX * elapsedMs;
-    velocityX = 0; // we don't measure lateral velocity
-    velocityY += (abs(linearAccelY) < CONFIG_ACCEL_THRESHOLD ? 0 : (linearAccelY * elapsed));
-    velocityZ += (abs(linearAccelZ) < CONFIG_ACCEL_THRESHOLD ? 0 : (linearAccelZ * elapsed));
-
-    // Calculate speed (magnitude of velocity)
-    float speed = magnitude(velocityX, velocityY, velocityZ);
-
-    unsigned long elapsedIntegration = millis() - start - elapsedI2c - elapsedFusion;
-
-#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
-    Serial.printf("[TaskMeasureSpeed] Integration duration: %d ms\n", elapsedIntegration);
-    Serial.printf("[TaskMeasureSpeed] Velocity: X=%0.3f, Y=%0.3f, Z=%0.3f \tm/s\n", velocityX, velocityY, velocityZ);
-
-    Serial.printf("[TaskMeasureSpeed] Speed: %d\n", speed);
+    char timestamp[42];
+    currentTimeISO8601(timestamp, sizeof(timestamp), nowEpochMillis);
+    Serial.printf("Rotation time: %d ms\n", durationMilliseconds);
+    Serial.printf("Velocity at %s: %0.9f %s\n", timestamp, velocity, velocityUnits);
 #endif
 
     SpeedUpdate_t update;
-    update.timestamp = start;
-    //strcpy(update.timestamp, "2024-01-01T00:00:00Z");
-    update.velocity = speed;
-    update.accelerationX = linearAccelX;
-    update.accelerationY = linearAccelY;
-    update.accelerationZ = linearAccelZ;
+    update.timestamp = nowEpochMillis;
+    update.velocity = (int)(round(velocity));
 
     // Move on if there is no room in the queue
     if(xQueueSendToBack(speedUpdateQueue, &update, 0) != pdPASS) {
@@ -276,7 +175,6 @@ void TaskMeasureSpeed(void *pvParameters) {
 #ifdef CONFIG_ENABLE_DEBUG_OUTPUT
     Serial.println("[TaskMeasureSpeed] Sent speed update");
 #endif
-    vTaskDelay(pdMS_TO_TICKS(CONFIG_SENSOR_UPDATE_MILLISECONDS));
   }
 }
 
@@ -309,12 +207,9 @@ void TaskRecordSpeed(void *pvParameters) {
         char currentTimestamp[] = "2024-01-01T00:00:00.000Z";
         strcpy(update.timestamp, currentTimestamp);
         update.velocity = 0;
-        update.accelerationX = 0;
-        update.accelerationY = 0;
-        update.accelerationZ = 0;
 
         http.addHeader("Content-Type", "application/json");
-        char payload[150];
+        char payload[60];
         if (serializeSpeedUpdate(payload, sizeof(payload), &update) < 0) {
           Serial.println("[TaskRecordSpeed] Failed to serialize payload");
           continue;
@@ -437,6 +332,7 @@ void setup() {
   Serial.println("[setup] Serial connection ready");
 
   pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(hallSensorPin, INPUT);
 
   Serial.printf("[setup] Connecting to WiFi SSID '%s'\n", WIFI_SSID);
   WiFi.disconnect(true);

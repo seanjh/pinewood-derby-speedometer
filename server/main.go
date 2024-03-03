@@ -46,21 +46,12 @@ func handleHealthCheck(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-type speedAcceleration struct {
-	XMetersPerSecondSquared int `json:"x"`
-	YMetersPerSecondSquared int `json:"y"`
-	ZMetersPerSecondSquared int `json:"z"`
-}
-
 type metersPerSecond = int
 type metersPerSecondSquared = int
 
 type speedUpdate struct {
-	Timestamp     *string                 `json:"timestamp"`
-	Velocity      *metersPerSecond        `json:"velocity"`
-	AccelerationX *metersPerSecondSquared `json:"acceleration_x"`
-	AccelerationY *metersPerSecondSquared `json:"acceleration_y"`
-	AccelerationZ *metersPerSecondSquared `json:"acceleration_z"`
+	Timestamp *string          `json:"timestamp"`
+	Velocity  *metersPerSecond `json:"velocity"`
 }
 
 type errorEntry struct {
