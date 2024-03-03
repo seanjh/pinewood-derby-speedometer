@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 
 #include <HTTPClient.h>
@@ -40,12 +41,11 @@ QueueHandle_t speedUpdateQueue;
 // the time string or the time cannot be generated for some other
 // reason.
 int currentTimeISO8601(char* buff, size_t buffSize, uint64_t epochTimeMillis) {
-  if (!buff || buffSize < 24) { // Increased buffer size requirement for milliseconds
+  if (!buff || buffSize < 24) {
     Serial.println("[currentTimeISO8601] Invalid buffer");
     return -1;
   }
 
-  // Separate seconds and milliseconds from the epoch time in milliseconds
   time_t currentTimeSeconds = epochTimeMillis / 1000;
   int milliseconds = epochTimeMillis % 1000;
   struct tm *utcTime = gmtime(&currentTimeSeconds);
@@ -81,16 +81,22 @@ uint64_t uptimeToEpochMillis(int64_t uptime) {
 // characters written to the buffer, or a number < 0 when the payload
 // has now been completely written.
 int serializeSpeedUpdate(char* buff, int buffSize, struct SpeedUpdate *update) {
-  if (!buff || buffSize < 150) {
+  if (!buff || buffSize < 60) {
     Serial.println("[serializeSpeedUpdate] Invalid buffer");
     return -1;
   }
 
+  // convert epoch time (in millis) to an ISO8601 string
+  char timestamp[25];
+  currentTimeISO8601(timestamp, sizeof(timestamp), update->timestamp);
+
+#ifdef CONFIG_ENABLE_DEBUG_OUTPUT
   Serial.println("[serializeSpeedUpdate] Serializing speed update");
+#endif
   return snprintf(
     buff, buffSize,
     "{\"timestamp\":\"%s\",\"velocity\":%d}",
-    update->timestamp, update->velocity
+    timestamp, update->velocity
   );
 }
 
@@ -131,10 +137,12 @@ void TaskMeasureSpeed(void *pvParameters) {
     }
     lastState = state;
 
+    // don't need to record the time the magnet remains "on" the sensor
     if (state == stateNothing) {
       continue;
     }
 
+    // rotation time is the time between two "magnet on" states
     int durationMilliseconds = ((now - lastRotationTime) % 1000000) / 1000;
     lastRotationTime = now;
 
@@ -201,7 +209,7 @@ void TaskRecordSpeed(void *pvParameters) {
         update.velocity = 0;
 
         http.addHeader("Content-Type", "application/json");
-        char payload[150];
+        char payload[60];
         if (serializeSpeedUpdate(payload, sizeof(payload), &update) < 0) {
           Serial.println("[TaskRecordSpeed] Failed to serialize payload");
           continue;
