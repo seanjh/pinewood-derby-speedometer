@@ -10,25 +10,27 @@
 #include <Adafruit_GFX.h>
 #include "Adafruit_LEDBackpack.h"
 
-#include <Adafruit_AHRS.h>
-#include <Adafruit_Sensor_Calibration_EEPROM.h>
-#include <Adafruit_LIS3MDL.h>
-#include <Adafruit_LSM6DSOX.h>
-
 #include "Config.h"
 #include "Secrets.h"
 
-const int hallSensorPin = 13;
-const int stateMagnet = LOW;
-const int stateNothing = HIGH;
+static const int hallSensorPin = 12;
+static const int stateMagnet = LOW;
+static const int stateNothing = HIGH;
+
+static const float millisecondsPerSecond = 1000.0;
+static const float millimetersPerMeter = 1000.0;
+static const float wheelCircumference = 0.0879646;
+static const float kphToMph = 0.621371;
+#ifdef CONFIG_CONVERT_TO_MPH
+static const char velocityUnits[] = "mi/h";
+#else
+static const char velocityUnits[] = "km/h";
+#endif
 
 // Speed update (velocity and acceleration)
 typedef struct SpeedUpdate {
-  unsigned long timestamp;
+  uint64_t timestamp;
   int velocity;
-  float accelerationX;
-  float accelerationY;
-  float accelerationZ;
 } SpeedUpdate_t;
 
 QueueHandle_t speedUpdateQueue;
@@ -37,26 +39,42 @@ QueueHandle_t speedUpdateQueue;
 // or a -1 to represent an error for cases when buff doesn't fit
 // the time string or the time cannot be generated for some other
 // reason.
-int currentTimeISO8601(char* buff, size_t buffSize) {
-  // TODO(sean) rewrite w/ baseline + ticks
-  if (!buff || buffSize < 21) {
+int currentTimeISO8601(char* buff, size_t buffSize, uint64_t epochTimeMillis) {
+  if (!buff || buffSize < 24) { // Increased buffer size requirement for milliseconds
     Serial.println("[currentTimeISO8601] Invalid buffer");
     return -1;
   }
 
-  time_t currentTime = time(NULL);
-  Serial.print("[currentTimeISO8601] Formatting current time as ISO8601: ");
-  Serial.println(currentTime);
-  struct tm *utcTime = gmtime(&currentTime);
+  // Separate seconds and milliseconds from the epoch time in milliseconds
+  time_t currentTimeSeconds = epochTimeMillis / 1000;
+  int milliseconds = epochTimeMillis % 1000;
+  struct tm *utcTime = gmtime(&currentTimeSeconds);
 
   if (!utcTime) {
-    Serial.println("[currentTimeISO8601] Failed to convert current time to UTC time");
+    Serial.println("[currentTimeISO8601] Failed to convert time to UTC time");
     return -1;
   }
 
-  strftime(buff, buffSize, "%Y-%m-%dT%H:%M:%SZ", utcTime);
-  Serial.printf("[currentTimeISO8601] Formatted current time: %s\n", buff);
+  char isoTime[20];
+  strftime(isoTime, sizeof(isoTime), "%Y-%m-%dT%H:%M:%S", utcTime);
+
+  if (snprintf(buff, buffSize, "%s.%03dZ", isoTime, milliseconds) >= buffSize) {
+    Serial.println("[currentTimeISO8601] Buffer size too small");
+    return -1;
+  }
+
   return 0;
+}
+
+uint64_t uptimeToEpochMillis(int64_t uptime) {
+  struct timeval now;
+  gettimeofday(&now, NULL);
+
+  uint64_t nowEpochMillis = (uint64_t)now.tv_sec * 1000LL + (now.tv_usec / 1000LL);
+
+  uint64_t currentUptimeMillis = esp_timer_get_time() / 1000;
+
+  return nowEpochMillis - (currentUptimeMillis - uptime / 1000);
 }
 
 // Assign the payload JSON to the buffer, returning the number of
@@ -70,18 +88,9 @@ int serializeSpeedUpdate(char* buff, int buffSize, struct SpeedUpdate *update) {
 
   Serial.println("[serializeSpeedUpdate] Serializing speed update");
   return snprintf(
-    buff,
-    buffSize,
-    "{\"timestamp\":\"%s\"," \
-    "\"velocity\":%d," \
-    "\"acceleration_x\":%d," \
-    "\"acceleration_y\":%d," \
-    "\"acceleration_z\":%d}",
-    update->timestamp,
-    update->velocity,
-    update->accelerationX,
-    update->accelerationY,
-    update->accelerationZ
+    buff, buffSize,
+    "{\"timestamp\":\"%s\",\"velocity\":%d}",
+    update->timestamp, update->velocity
   );
 }
 
@@ -103,33 +112,7 @@ void setClock() {
   struct tm timeinfo;
   gmtime_r(&nowSecs, &timeinfo);
   Serial.print(F("[setClock] Current time: "));
-  Serial.print(asctime(&timeinfo));
-}
-
-void initSensors(void) {
-}
-
-void setupSensors(void) {
-}
-
-// Return the magnitude of the vector
-float magnitude(float x, float y, float z) {
-  return sqrt(x*x + y*y + z*z);
-}
-
-int formatState(int value, char *buff, size_t buff_size) {
-  if (buff_size < 4) {
-    return 7;
-  }
-
-  switch (value) {
-  case stateMagnet:
-  strcpy(buff, "magnet");
-  return 0;
-  case stateNothing:
-  strcpy(buff, "nothing");
-  return 0;
-  }
+  Serial.println(asctime(&timeinfo));
 }
 
 // Record the current velocity from the accelerometer.
@@ -137,38 +120,44 @@ void TaskMeasureSpeed(void *pvParameters) {
   Serial.println("[TaskMeasureSpeed] Starting...");
 
   int lastState = stateNothing;
-  int lastTime = 0;
+  int64_t lastTime = esp_timer_get_time();
+  int64_t lastRotationTime = lastTime;
   for (;;) {
-    unsigned long now = millis();
+    int64_t now = esp_timer_get_time();
     int state = digitalRead(hallSensorPin);
 
     if (state == lastState) {
-    char s[7];
-    formatState(state, s, sizeof(s));
-      Serial.printf("Ignoring repeat state: %s\n", s);
-      vTaskDelay(pdMS_TO_TICKS(CONFIG_SENSOR_UPDATE_MILLISECONDS));
+      continue;
+    }
+    lastState = state;
+
+    if (state == stateNothing) {
       continue;
     }
 
-    int elapsed = now - lastTime;
-    lastTime = now;
-    lastState = state;
+    int durationMilliseconds = ((now - lastRotationTime) % 1000000) / 1000;
+    lastRotationTime = now;
 
-    char s[7];
-    formatState(state, s, sizeof(s));
-    Serial.printf("Sensor transitioned after %d: %s\n", elapsed, s);
+    float velocity = (
+      wheelCircumference // change in position
+      / durationMilliseconds // change in time
+      * 3600 // conversion m/ms -> km/h
+#ifdef CONFIG_CONVERT_TO_MPH
+      * kphToMph // conversion km/h -> mi/h
+#endif
+    );
 
+    uint64_t nowEpochMillis = uptimeToEpochMillis(now);
 #ifdef CONFIG_ENABLE_DEBUG_OUTPUT
-  Serial.printf("\n");
+    char timestamp[42];
+    currentTimeISO8601(timestamp, sizeof(timestamp), nowEpochMillis);
+    Serial.printf("Rotation time: %d ms\n", durationMilliseconds);
+    Serial.printf("Velocity at %s: %0.9f %s\n", timestamp, velocity, velocityUnits);
 #endif
 
     SpeedUpdate_t update;
-    update.timestamp = 0;
-    //strcpy(update.timestamp, "2024-01-01T00:00:00Z");
-    update.velocity = 0;
-    update.accelerationX = 0;
-    update.accelerationY = 0;
-    update.accelerationZ = 0;
+    update.timestamp = nowEpochMillis;
+    update.velocity = (int)(round(velocity));
 
     // Move on if there is no room in the queue
     if(xQueueSendToBack(speedUpdateQueue, &update, 0) != pdPASS) {
@@ -178,7 +167,6 @@ void TaskMeasureSpeed(void *pvParameters) {
 #ifdef CONFIG_ENABLE_DEBUG_OUTPUT
     Serial.println("[TaskMeasureSpeed] Sent speed update");
 #endif
-    vTaskDelay(pdMS_TO_TICKS(CONFIG_SENSOR_UPDATE_MILLISECONDS));
   }
 }
 
@@ -211,9 +199,6 @@ void TaskRecordSpeed(void *pvParameters) {
         char currentTimestamp[] = "2024-01-01T00:00:00.000Z";
         strcpy(update.timestamp, currentTimestamp);
         update.velocity = 0;
-        update.accelerationX = 0;
-        update.accelerationY = 0;
-        update.accelerationZ = 0;
 
         http.addHeader("Content-Type", "application/json");
         char payload[150];
