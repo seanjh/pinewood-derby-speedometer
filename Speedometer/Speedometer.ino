@@ -27,11 +27,12 @@ static const char velocityUnits[] = "mi/h";
 #else
 static const char velocityUnits[] = "km/h";
 #endif
+static const int timeoutSpeedMicroseconds = 1 * 1000 * 1000; // 5 second in microseconds
 
 // Speed update (velocity and acceleration)
 typedef struct SpeedUpdate {
   uint64_t timestamp;
-  int velocity;
+  float velocity;
 } SpeedUpdate_t;
 
 QueueHandle_t speedUpdateQueue;
@@ -125,6 +126,7 @@ void setClock() {
 void TaskMeasureSpeed(void *pvParameters) {
   Serial.println("[TaskMeasureSpeed] Starting...");
 
+  int timedOut = false;
   int lastState = stateNothing;
   int64_t lastTime = esp_timer_get_time();
   int64_t lastRotationTime = lastTime;
@@ -133,9 +135,21 @@ void TaskMeasureSpeed(void *pvParameters) {
     int state = digitalRead(hallSensorPin);
 
     if (state == lastState) {
+      if (!timedOut && (now - lastRotationTime) > timeoutSpeedMicroseconds) {
+        timedOut = true;
+        SpeedUpdate_t update;
+        update.timestamp = uptimeToEpochMillis(now);
+        update.velocity = 0;
+        if (xQueueSendToBack(speedUpdateQueue, &update, 0) != pdPASS) {
+          Serial.println("[TaskMeasureSpeed] Failed to send timeout");
+        }
+        Serial.println("[TaskMeasureSpeed] Timeout");
+      }
+
       continue;
     }
     lastState = state;
+    timedOut = false;
 
     // don't need to record the time the magnet remains "on" the sensor
     if (state == stateNothing) {
@@ -160,12 +174,12 @@ void TaskMeasureSpeed(void *pvParameters) {
     char timestamp[42];
     currentTimeISO8601(timestamp, sizeof(timestamp), nowEpochMillis);
     Serial.printf("Rotation time: %d ms\n", durationMilliseconds);
-    Serial.printf("Velocity at %s: %0.9f %s\n", timestamp, velocity, velocityUnits);
+    Serial.printf("Velocity at %s: %0.4f %s\n", timestamp, velocity, velocityUnits);
 #endif
 
     SpeedUpdate_t update;
     update.timestamp = nowEpochMillis;
-    update.velocity = (int)(round(velocity));
+    update.velocity = velocity;
 
     // Move on if there is no room in the queue
     if(xQueueSendToBack(speedUpdateQueue, &update, 0) != pdPASS) {
@@ -247,6 +261,40 @@ void TaskRecordSpeed(void *pvParameters) {
 }
 #endif
 
+// Write the specified speed to the display.
+void displaySpeed(Adafruit_7segment *matrix, float velocity) {
+  int dotOne, dotTwo, dotThree, dotFour;
+  dotOne = dotTwo = dotThree = dotFour = false;
+
+  int digitOne, digitTwo, digitThree, digitFour;
+  digitOne = digitTwo = digitThree = digitFour = 0;
+
+  int intpart = (int)velocity;
+  float decpart = velocity - intpart;
+
+  if (velocity > 99.9) {
+    // use all digits to display high speed
+    digitOne = intpart / 1000;
+    digitTwo = (intpart / 100) % 10;
+    digitThree = (intpart / 10) % 10;
+    digitFour = intpart % 10;
+  } else {
+    // display speeds between 0-100 with 2 decimal places
+    dotTwo = true;
+
+    digitOne = (intpart / 10) % 10;
+    digitTwo = intpart % 10;
+    digitThree = (int)(decpart * 10) % 10;
+    digitFour = (int)(decpart * 100) % 10;
+  }
+
+  matrix->writeDigitNum(0, digitOne, dotOne);
+  matrix->writeDigitNum(1, digitTwo, dotTwo);
+  matrix->writeDigitNum(3, digitThree, dotThree);
+  matrix->writeDigitNum(4, digitFour, dotFour);
+  matrix->writeDisplay();
+}
+
 // Output the velocity to the 7-Segment display.
 void TaskUpdateDisplay(void *pvParameters) {
   Serial.println("[TaskUpdateDisplay] Starting...");
@@ -254,7 +302,9 @@ void TaskUpdateDisplay(void *pvParameters) {
   Adafruit_7segment matrix = Adafruit_7segment();
   matrix.begin(0x70);
   matrix.clear();
+  matrix.drawColon(false);
 
+  int64_t lastUpdate = 0;
   for(;;) {
     SpeedUpdate_t update;
     if (xQueueReceive(speedUpdateQueue, &update, portMAX_DELAY) != pdPASS) {
@@ -263,11 +313,7 @@ void TaskUpdateDisplay(void *pvParameters) {
 #ifdef CONFIG_ENABLE_DEBUG_OUTPUT
     Serial.println("[TaskUpdateDisplay] Received message from queue");
 #endif
-    matrix.writeDigitNum(0, (update.velocity / 1000));
-    matrix.writeDigitNum(1, (update.velocity / 100) % 10);
-    matrix.writeDigitNum(3, (update.velocity / 10) % 10);
-    matrix.writeDigitNum(4, update.velocity % 10);
-    matrix.writeDisplay();
+    displaySpeed(&matrix, update.velocity);
   }
 }
 
