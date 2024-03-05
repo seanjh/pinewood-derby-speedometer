@@ -27,7 +27,7 @@ static const char velocityUnits[] = "mi/h";
 #else
 static const char velocityUnits[] = "km/h";
 #endif
-static const int timeoutSpeedMicroseconds = 1 * 1000 * 1000; // 5 second in microseconds
+static const int timeoutSpeedMilliseconds = 1 * 1000; // 5 second in milliseconds
 
 // Speed update (velocity and acceleration)
 typedef struct SpeedUpdate {
@@ -67,15 +67,14 @@ int currentTimeISO8601(char* buff, size_t buffSize, uint64_t epochTimeMillis) {
   return 0;
 }
 
-uint64_t uptimeToEpochMillis(int64_t uptime) {
+uint64_t uptimeToEpochMillis(unsigned long uptime) {
   struct timeval now;
   gettimeofday(&now, NULL);
 
-  uint64_t nowEpochMillis = (uint64_t)now.tv_sec * 1000LL + (now.tv_usec / 1000LL);
+  unsigned long nowEpochMillis = (unsigned long)now.tv_sec * 1000L + (now.tv_usec / 1000L);
+  unsigned long currentUptimeMillis = millis();
 
-  uint64_t currentUptimeMillis = esp_timer_get_time() / 1000;
-
-  return nowEpochMillis - (currentUptimeMillis - uptime / 1000);
+  return nowEpochMillis - (currentUptimeMillis - uptime);
 }
 
 // Assign the payload JSON to the buffer, returning the number of
@@ -128,14 +127,14 @@ void TaskMeasureSpeed(void *pvParameters) {
 
   int timedOut = false;
   int lastState = stateNothing;
-  int64_t lastTime = esp_timer_get_time();
+  int64_t lastTime = millis();
   int64_t lastRotationTime = lastTime;
   for (;;) {
-    int64_t now = esp_timer_get_time();
+    int64_t now = millis();
     int state = digitalRead(hallSensorPin);
 
     if (state == lastState) {
-      if (!timedOut && (now - lastRotationTime) > timeoutSpeedMicroseconds) {
+      if (!timedOut && (now - lastRotationTime) > timeoutSpeedMilliseconds) {
         timedOut = true;
         SpeedUpdate_t update;
         update.timestamp = uptimeToEpochMillis(now);
@@ -157,7 +156,7 @@ void TaskMeasureSpeed(void *pvParameters) {
     }
 
     // rotation time is the time between two "magnet on" states
-    int durationMilliseconds = ((now - lastRotationTime) % 1000000) / 1000;
+    int durationMilliseconds = now - lastRotationTime;
     lastRotationTime = now;
 
     float velocity = (
