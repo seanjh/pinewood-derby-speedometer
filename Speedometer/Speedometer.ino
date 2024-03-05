@@ -303,7 +303,8 @@ void TaskUpdateDisplay(void *pvParameters) {
   matrix.clear();
   matrix.drawColon(false);
 
-  int64_t lastUpdate = 0;
+  displaySpeed(&matrix, 0.0);
+
   for(;;) {
     SpeedUpdate_t update;
     if (xQueueReceive(speedUpdateQueue, &update, portMAX_DELAY) != pdPASS) {
