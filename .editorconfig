@@ -15,5 +15,9 @@ indent_size = 2
 indent_style = space
 indent_size = 4
 
+[*.nix]
+indent_style = space
+indent_style = 2
+
 [Makefile]
 indent_style = tab
