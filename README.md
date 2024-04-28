@@ -22,6 +22,8 @@ Implements a simple speedometer for the 2024 Cub Scouts Pinewood Derby just beca
 
 For environments with nix, simply run `nix-shell` to setup the development environment. In the absense of nix, the manual instructions below may be followed instead.
 
+The project requires a handful of secrets to be defined in `Speedometer/Secrets.h` - and example is provided in `Speedometer/Secrets_example.h`.
+
 #### Manual
 
 - `arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json`

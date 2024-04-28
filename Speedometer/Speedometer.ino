@@ -380,13 +380,15 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(hallSensorPin, INPUT);
 
-  Serial.printf("[setup] Connecting to WiFi SSID '%s'\n", WIFI_SSID);
+#ifdef CONFIG_ENABLE_SPEED_RECORDING
+  Serial.printf("[setup] Connecting to WiFi SSID '%s'\n", SECRETS_WIFI_SSID);
   WiFi.disconnect(true);
   WiFi.onEvent(handleWiFiEvent);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(SECRETS_WIFI_SSID, SECRETS_WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) { delay(100); }
   
   setClock();
+#endif
 
   speedUpdateQueue = xQueueCreate(10, sizeof(SpeedUpdate_t));
   if (speedUpdateQueue == NULL) {
